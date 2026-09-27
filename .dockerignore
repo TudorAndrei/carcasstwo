@@ -1,0 +1,8 @@
+.git
+.tmp
+*.pdf
+*.png
+*.exe
+/bin/
+/carcasstwo
+**/*_test.go

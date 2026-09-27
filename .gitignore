@@ -1,0 +1,5 @@
+*.exe
+/carcasstwo
+/bin/
+.tmp/
+.DS_Store
