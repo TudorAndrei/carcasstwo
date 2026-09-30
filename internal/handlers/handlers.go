@@ -6,6 +6,7 @@ import (
 	"html"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -31,6 +32,7 @@ func (s *Server) Routes(r chi.Router) {
 	r.Post("/api/join", s.JoinByCode)
 	r.Post("/api/rooms/{code}/join", s.JoinRoom)
 	r.Post("/api/rooms/{code}/start", s.StartGame)
+	r.Post("/api/rooms/{code}/add-bot", s.AddBot)
 	r.Post("/api/rooms/{code}/place-tile", s.PlaceTile)
 	r.Post("/api/rooms/{code}/place-meeple", s.PlaceMeeple)
 	r.Post("/api/rooms/{code}/skip-meeple", s.SkipMeeple)
@@ -239,7 +241,53 @@ func (s *Server) StartGame(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Hub.Broadcast(code)
 	sse := datastar.NewSSE(w, r)
-	_ = sse.PatchElements(renderHUD(room.Engine.Public(playerCookie(w, r))))
+	playerID := playerCookie(w, r)
+	st := room.Engine.Public(playerID)
+	_ = sse.PatchElements(renderLobby(st, playerID))
+	_ = sse.PatchElements(renderHUD(st))
+	_ = sse.DispatchCustomEvent("carcassonne:state", st)
+	s.runBots(code)
+}
+
+func (s *Server) AddBot(w http.ResponseWriter, r *http.Request) {
+	code := strings.ToUpper(chi.URLParam(r, "code"))
+	room, ok := s.Lobby.Get(code)
+	if !ok {
+		http.Error(w, "not found", 404)
+		return
+	}
+	if _, err := room.Engine.AddBot(); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	s.Hub.Broadcast(code)
+	sse := datastar.NewSSE(w, r)
+	playerID := playerCookie(w, r)
+	_ = sse.PatchElements(renderLobby(room.Engine.Public(playerID), playerID))
+}
+
+func (s *Server) runBots(code string) {
+	room, ok := s.Lobby.Get(code)
+	if !ok {
+		return
+	}
+	if !room.TryStartBots() {
+		return
+	}
+	go func() {
+		defer room.StopBots()
+		for {
+			if !room.Engine.CurrentPlayerIsBot() {
+				return
+			}
+			time.Sleep(700 * time.Millisecond)
+			acted, err := room.Engine.BotAct()
+			if err != nil || !acted {
+				return
+			}
+			s.Hub.Broadcast(code)
+		}
+	}()
 }
 
 func (s *Server) PlaceTile(w http.ResponseWriter, r *http.Request) {
@@ -268,6 +316,7 @@ func (s *Server) PlaceTile(w http.ResponseWriter, r *http.Request) {
 	st := room.Engine.Public(playerID)
 	_ = sse.PatchElements(renderHUD(st))
 	_ = sse.DispatchCustomEvent("carcassonne:state", st)
+	s.runBots(code)
 }
 
 func (s *Server) PlaceMeeple(w http.ResponseWriter, r *http.Request) {
@@ -296,6 +345,7 @@ func (s *Server) PlaceMeeple(w http.ResponseWriter, r *http.Request) {
 	st := room.Engine.Public(playerID)
 	_ = sse.PatchElements(renderHUD(st))
 	_ = sse.DispatchCustomEvent("carcassonne:state", st)
+	s.runBots(code)
 }
 
 func (s *Server) SkipMeeple(w http.ResponseWriter, r *http.Request) {
@@ -315,6 +365,7 @@ func (s *Server) SkipMeeple(w http.ResponseWriter, r *http.Request) {
 	st := room.Engine.Public(playerID)
 	_ = sse.PatchElements(renderHUD(st))
 	_ = sse.DispatchCustomEvent("carcassonne:state", st)
+	s.runBots(code)
 }
 
 func (s *Server) RecallAbbot(w http.ResponseWriter, r *http.Request) {
@@ -334,6 +385,7 @@ func (s *Server) RecallAbbot(w http.ResponseWriter, r *http.Request) {
 	st := room.Engine.Public(playerID)
 	_ = sse.PatchElements(renderHUD(st))
 	_ = sse.DispatchCustomEvent("carcassonne:state", st)
+	s.runBots(code)
 }
 
 func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
@@ -389,11 +441,13 @@ func renderLobby(st game.PublicState, youID string) string {
 	}
 	b.WriteString(`<ul class="players">`)
 	for _, p := range st.Players {
-		you := ""
+		tag := ""
 		if p.ID == youID {
-			you = " (you)"
+			tag = " (you)"
+		} else if p.IsBot {
+			tag = " · bot"
 		}
-		b.WriteString(fmt.Sprintf(`<li><span class="swatch" style="--c:var(--%s)"></span>%s%s</li>`, p.Color, html.EscapeString(p.Name), you))
+		b.WriteString(fmt.Sprintf(`<li><span class="swatch" style="--c:var(--%s)"></span>%s%s</li>`, p.Color, html.EscapeString(p.Name), tag))
 	}
 	b.WriteString(`</ul>`)
 	b.WriteString(fmt.Sprintf(`<p class="muted">%d / %d players</p>`, len(st.Players), st.Settings.MaxPlayers))
@@ -404,10 +458,13 @@ func renderLobby(st game.PublicState, youID string) string {
 		}
 		b.WriteString(`</ul>`)
 	}
+	if len(st.Players) < st.Settings.MaxPlayers {
+		b.WriteString(fmt.Sprintf(`<button class="btn" data-on:click="@post('/api/rooms/%s/add-bot')">Add bot</button>`, st.RoomCode))
+	}
 	if len(st.Players) >= 2 {
 		b.WriteString(fmt.Sprintf(`<button class="btn primary" data-on:click="@post('/api/rooms/%s/start')">Start game</button>`, st.RoomCode))
 	} else {
-		b.WriteString(`<p class="muted">Waiting for another player…</p>`)
+		b.WriteString(`<p class="muted">Add a bot or wait for another player…</p>`)
 	}
 	b.WriteString(`</div>`)
 	return b.String()
@@ -420,15 +477,20 @@ func renderHUD(st game.PublicState) string {
 	var b strings.Builder
 	b.WriteString(`<div id="hud">`)
 	b.WriteString(fmt.Sprintf(`<div class="hud-msg">%s</div>`, html.EscapeString(st.Message)))
+	yourTurn := st.Phase != game.PhaseGameOver && st.Turn >= 0 && st.Turn < len(st.Players) && st.Players[st.Turn].ID == st.YouID
 	b.WriteString(`<div class="scores">`)
 	for i, p := range st.Players {
 		turn := ""
 		if st.Phase != game.PhaseGameOver && i == st.Turn {
 			turn = " turn"
 		}
+		bot := ""
+		if p.IsBot {
+			bot = ` <span class="bot-tag">bot</span>`
+		}
 		b.WriteString(fmt.Sprintf(
-			`<div class="score%s" style="--c:var(--%s)"><span class="name">%s</span><span class="pts">%d</span><span class="m">♟%d</span>%s</div>`,
-			turn, p.Color, html.EscapeString(p.Name), p.Score, p.Meeple,
+			`<div class="score%s" style="--c:var(--%s)"><span class="name">%s%s</span><span class="pts">%d</span><span class="m">♟%d</span>%s</div>`,
+			turn, p.Color, html.EscapeString(p.Name), bot, p.Score, p.Meeple,
 			func() string {
 				if st.Settings.Expansions.Abbot {
 					return fmt.Sprintf(`<span class="m">✝%d</span>`, p.Abbot)
@@ -443,7 +505,7 @@ func renderHUD(st game.PublicState) string {
 		b.WriteString(`<span class="cur">Draw ready</span>`)
 	}
 	b.WriteString(`</div>`)
-	if st.Phase == game.PhasePlaceMeeple {
+	if yourTurn && st.Phase == game.PhasePlaceMeeple {
 		b.WriteString(`<div class="meeple-actions">`)
 		for _, slot := range st.MeepleSlots {
 			abbot := "false"
@@ -461,8 +523,11 @@ func renderHUD(st game.PublicState) string {
 		}
 		b.WriteString(`</div>`)
 	}
-	if st.Phase == game.PhasePlaceTile {
+	if yourTurn && st.Phase == game.PhasePlaceTile {
 		b.WriteString(`<div class="hint">Click a highlighted cell · R rotates</div>`)
+	}
+	if !yourTurn && st.Phase != game.PhaseGameOver && st.Turn >= 0 && st.Turn < len(st.Players) && st.Players[st.Turn].IsBot {
+		b.WriteString(`<div class="hint">Bot is thinking…</div>`)
 	}
 	b.WriteString(`</div>`)
 	return b.String()

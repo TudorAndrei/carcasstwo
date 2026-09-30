@@ -10,9 +10,27 @@ import (
 )
 
 type Room struct {
-	Code    string
-	Engine  *game.Engine
-	Created time.Time
+	Code       string
+	Engine     *game.Engine
+	Created    time.Time
+	botRunning bool
+	botMu      sync.Mutex
+}
+
+func (r *Room) TryStartBots() bool {
+	r.botMu.Lock()
+	defer r.botMu.Unlock()
+	if r.botRunning {
+		return false
+	}
+	r.botRunning = true
+	return true
+}
+
+func (r *Room) StopBots() {
+	r.botMu.Lock()
+	r.botRunning = false
+	r.botMu.Unlock()
 }
 
 type Manager struct {

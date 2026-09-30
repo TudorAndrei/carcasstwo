@@ -336,8 +336,14 @@ function updatePreview() {
   ghostGroup.add(previewTile);
 }
 
+function isYourTurn() {
+  if (!state?.players?.length) return false;
+  const cur = state.players[state.turn];
+  return !!cur && cur.id === state.youId;
+}
+
 async function placeAt(spot) {
-  if (!state || state.phase !== 'placeTile') return;
+  if (!state || state.phase !== 'placeTile' || !isYourTurn()) return;
   syncRotationToSpot(spot);
   const code = state.roomCode;
   const signals = JSON.stringify({ x: spot.x, y: spot.y, rot: selectedRot });

@@ -10,6 +10,7 @@ RUN go test ./... && go build -trimpath -ldflags="-s -w" -o /out/carcasstwo ./cm
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/carcasstwo /app/carcasstwo
+ENV HOST=0.0.0.0
 ENV PORT=8080
 EXPOSE 8080
 USER nonroot:nonroot

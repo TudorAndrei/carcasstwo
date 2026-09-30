@@ -197,6 +197,15 @@ body {
 
 .lobby-panel h2 { font-family: var(--font-display); margin: 0 0 0.5rem; }
 .lobby-panel .code { letter-spacing: 0.12em; }
+.lobby-panel .btn { width: 100%; margin-top: 0.5rem; }
+.bot-tag {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin-left: 0.25rem;
+}
 .players { list-style: none; padding: 0; margin: 0.75rem 0; }
 .players li { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0; }
 .swatch {

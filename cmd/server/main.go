@@ -3,6 +3,7 @@ package main
 import (
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 
@@ -15,10 +16,15 @@ import (
 )
 
 func main() {
-	addr := ":8080"
-	if v := os.Getenv("PORT"); v != "" {
-		addr = ":" + v
+	host := os.Getenv("HOST")
+	if host == "" {
+		host = "0.0.0.0"
 	}
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	addr := net.JoinHostPort(host, port)
 	l := lobby.NewManager()
 	h := hub.New()
 	s := handlers.New(l, h)
@@ -34,6 +40,6 @@ func main() {
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
 	s.Routes(r)
 
-	log.Printf("Carcassonne listening on http://localhost%s", addr)
+	log.Printf("Carcassonne listening on http://%s", addr)
 	log.Fatal(http.ListenAndServe(addr, r))
 }

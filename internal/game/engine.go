@@ -390,10 +390,11 @@ func (e *Engine) Public(youID string) PublicState {
 	}
 	var spots []Spot
 	var slots []MeepleSlot
-	if e.Phase == PhasePlaceTile && e.Current != nil {
+	yourTurn := e.Turn >= 0 && e.Turn < len(e.Players) && e.Players[e.Turn].ID == youID
+	if yourTurn && e.Phase == PhasePlaceTile && e.Current != nil {
 		spots = e.validSpotsLocked(*e.Current)
 	}
-	if e.Phase == PhasePlaceMeeple && e.LastPlaced != nil {
+	if yourTurn && e.Phase == PhasePlaceMeeple && e.LastPlaced != nil {
 		slots = e.availableMeepleSlotsLocked(*e.LastPlaced)
 	}
 	players := append([]Player{}, e.Players...)

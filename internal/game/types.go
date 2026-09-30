@@ -69,6 +69,7 @@ type Player struct {
 	Score  int         `json:"score"`
 	Meeple int         `json:"meeple"`
 	Abbot  int         `json:"abbot"`
+	IsBot  bool        `json:"isBot"`
 }
 
 type TileDef struct {
